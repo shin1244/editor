@@ -1,5 +1,6 @@
 import { Container, Element } from '@playcanvas/pcui';
 
+import { backend } from '@/common/backend';
 import { tooltip, tooltipSimpleItem } from '@/common/tooltips';
 
 editor.once('load', () => {
@@ -15,7 +16,6 @@ editor.once('load', () => {
 
     const createItem = function (id: string) {
         const link = document.createElement('a');
-        link.href = `/${id}`;
         link.target = '_blank';
 
         const img = new Image();
@@ -23,7 +23,7 @@ editor.once('load', () => {
             item.style.borderColor = editor.call('users:color', id, 'hex');
         };
 
-        img.src = `/api/users/${id}/thumbnail?size=28`;
+        img.src = `${config.url.api}/users/${id}/thumbnail?size=28`;
         link.appendChild(img);
 
         const item = new Element({
@@ -34,7 +34,10 @@ editor.once('load', () => {
         wioPanel.append(item);
 
         editor.call('users:loadOne', id, (user: { id: string; name: string; color: string }) => {
-            link.href = `/user/${user.username}`;
+            const { pages } = backend();
+            if (pages) {
+                link.href = pages.user(user.username);
+            }
 
             tooltips[id] = tooltipSimpleItem({
                 text: user.username

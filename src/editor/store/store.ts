@@ -1,3 +1,12 @@
+import { backend, UNSUPPORTED } from '@/common/backend';
+import { createLog } from '@/common/sentry';
+
+const log = createLog('<PATH>');
+
+type StoreCloneResponse = {
+    fontSources?: number[];
+};
+
 editor.once('load', () => {
     // Loads all the store's items
     editor.method('store:list', (search, skip, limit, selectedFilter, tags, sortPolicy, sortDescending) => {
@@ -6,7 +15,11 @@ editor.once('load', () => {
             searchTags.push(selectedFilter);
         }
 
-        return editor.api.globals.rest.store
+        const catalog = backend().storeCatalog;
+        if (!catalog) {
+            return Promise.reject(UNSUPPORTED);
+        }
+        return catalog
             .storeList({
                 search: search && search.length ? encodeURIComponent(search) : null,
                 regex: search && search.length,
@@ -40,6 +53,10 @@ editor.once('load', () => {
             sortPolicy: string,
             sortDescending: boolean
         ) => {
+            if (!backend().sketchfabCatalog) {
+                return Promise.reject(UNSUPPORTED);
+            }
+
             // Calculate the date from a week ago
             const weekAgoDate = new Date();
             weekAgoDate.setDate(new Date().getDate() - 7);
@@ -81,7 +98,11 @@ editor.once('load', () => {
         'store:assets:list',
         (search: string, skip: number, limit: number, tags: string[], sortPolicy: string, sortDescending: boolean) => {
             const searchTags = tags || [];
-            return editor.api.globals.rest.assets
+            const userAssets = backend().userAssets;
+            if (!userAssets) {
+                return Promise.reject(UNSUPPORTED);
+            }
+            return userAssets
                 .assetsList({
                     search: search && search.length ? encodeURIComponent(search) : null,
                     regex: search && search.length,
@@ -100,7 +121,12 @@ editor.once('load', () => {
         return new Promise((resolve, reject) => {
             // get selected folder in assets panel
             const selectedFolder = editor.call('assets:panel:currentFolder');
-            editor.api.globals.rest.store
+            const service = backend().storeImport;
+            if (!service) {
+                reject(UNSUPPORTED);
+                return;
+            }
+            service
                 .storeClone(storeItemId, {
                     scope: {
                         type: 'project',
@@ -111,7 +137,11 @@ editor.once('load', () => {
                     license: license
                 })
                 .on('load', (_status: number, response: unknown) => {
-                    resolve(response);
+                    const data = response as StoreCloneResponse;
+                    Promise.all((data.fontSources || []).map((id) => editor.call('fonts:unpack', id))).then(
+                        () => resolve(response),
+                        reject
+                    );
                 })
                 .on('error', (_status: number, error: unknown) => {
                     reject(error);
@@ -124,7 +154,12 @@ editor.once('load', () => {
         return new Promise((resolve, reject) => {
             // get selected folder in assets panel
             const selectedFolder = editor.call('assets:panel:currentFolder');
-            editor.api.globals.rest.store
+            const service = backend().storeImport;
+            if (!service) {
+                reject(UNSUPPORTED);
+                return;
+            }
+            service
                 .storeClone(assetId, {
                     scope: {
                         type: 'project',
@@ -148,7 +183,12 @@ editor.once('load', () => {
         return new Promise((resolve, reject) => {
             // get selected folder in assets panel
             const selectedFolder = editor.call('assets:panel:currentFolder');
-            editor.api.globals.rest.store
+            const service = backend().storeImport;
+            if (!service) {
+                reject(UNSUPPORTED);
+                return;
+            }
+            service
                 .storeClone(storeItemId, {
                     scope: {
                         type: 'project',
@@ -170,13 +210,19 @@ editor.once('load', () => {
 
     // Load asset file contents and call callback
     editor.method('store:loadAsset', (asset: { id: string; name: string }) => {
-        return editor.api.globals.rest.store.storeAssetFile(asset.id, asset.name).promisify();
+        const catalog = backend().storeCatalog;
+        return catalog ? catalog.storeAssetFile(asset.id, asset.name).promisify() : Promise.reject(UNSUPPORTED);
     });
 
     // Upload specified export
     editor.method('store:uploadStoreItems', (file: File, progressHandler?: (progress: unknown) => void) => {
         return new Promise((resolve, reject) => {
-            editor.api.globals.rest.store
+            const service = backend().storePublishing;
+            if (!service) {
+                reject(UNSUPPORTED);
+                return;
+            }
+            service
                 .storeUpload(file, 'multipart/form-data')
                 .on('progress', (progress: unknown) => {
                     if (progressHandler) {
@@ -194,7 +240,11 @@ editor.once('load', () => {
 
     // Loads all the store's items
     editor.method('store:license:list', async () => {
-        const results = await editor.api.globals.rest.store.storeLicenses().promisify();
+        const catalog = backend().storeCatalog;
+        if (!catalog) {
+            throw UNSUPPORTED;
+        }
+        const results = await catalog.storeLicenses().promisify();
         return results.result;
     });
 });

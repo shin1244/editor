@@ -61,8 +61,9 @@ class Entity extends Events {
             rotation: number[];
             scale: number[];
             components: object;
-            template_id?: number;
-            template_ent_ids?: Record<string, string>;
+            template: number | null;
+            template_id: number | null;
+            template_ent_ids: Record<string, string> | null;
         } = {
             name: name,
             tags: data.tags || [],
@@ -73,15 +74,11 @@ class Entity extends Events {
             position: data.position || [0, 0, 0],
             rotation: data.rotation || [0, 0, 0],
             scale: data.scale || [1, 1, 1],
-            components: {}
+            components: {},
+            template: data.template !== undefined ? data.template : null,
+            template_id: data.template_id !== undefined ? data.template_id : null,
+            template_ent_ids: data.template_ent_ids !== undefined ? data.template_ent_ids : null
         };
-
-        if (data.template_id) {
-            observerData.template_id = data.template_id;
-        }
-        if (data.template_ent_ids) {
-            observerData.template_ent_ids = data.template_ent_ids;
-        }
 
         this._observer = new Observer(observerData) as EntityObserver;
 
@@ -403,6 +400,28 @@ class Entity extends Events {
     addComponent(component: string, data = {}) {
         const defaultData = api.schema.components.getDefaultData(component);
         const componentData = Object.assign(defaultData, data);
+
+        // the engine places an element from its margin, so derive it from the current position
+        // or the default margin moves the entity onto its anchor
+        const { anchor, pivot, width, height } = componentData as {
+            anchor?: number[];
+            pivot?: number[];
+            width?: number;
+            height?: number;
+        };
+        if (
+            component === 'element' &&
+            !('margin' in data) &&
+            anchor &&
+            anchor[0] === anchor[2] &&
+            anchor[1] === anchor[3]
+        ) {
+            const [x, y] = this.get('position') ?? [0, 0];
+            const left = x - width * pivot[0];
+            const bottom = y - height * pivot[1];
+            componentData.margin = [left, bottom, -(left + width), -(bottom + height)];
+        }
+
         this.set(`components.${component}`, componentData);
     }
 

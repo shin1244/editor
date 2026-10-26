@@ -10,7 +10,7 @@ describe('Assets API tests', function () {
         api.globals.messenger = null;
         api.globals.history = null;
         api.globals.assets = new api.Assets();
-        api.globals.apiUrl = '';
+        api.globals.apiUrl = '/api';
         assets = api.globals.assets;
         sandbox = sinon.createSandbox();
     });
@@ -405,8 +405,28 @@ ${className}.prototype.update = function(dt) {
             textures: [1, 2, 3, 4, 5, 6],
             minFilter: 5,
             magFilter: 1,
-            anisotropy: 1
+            anisotropy: 1,
+            rgbm: false
         }));
+    });
+
+    it('creates rgbm cubemap asset from rgbm textures', function () {
+        const xhr = sandbox.useFakeXMLHttpRequest();
+        const requests = [];
+        xhr.onCreate = (fake) => {
+            requests.push(fake);
+        };
+
+        api.globals.projectId = 1;
+
+        const textures = [];
+        for (let i = 0; i < 6; i++) {
+            textures.push(new api.Asset({ id: i + 1, data: { rgbm: true } }));
+        }
+
+        api.globals.assets.createCubemap({ textures });
+
+        expect(JSON.parse(requests[0].requestBody.get('data')).rgbm).to.equal(true);
     });
 
     it('creates folder asset', function () {
@@ -763,6 +783,13 @@ ${className}.prototype.update = function(dt) {
         expect(data.get('parent')).to.equal('10');
         expect(data.get('preload')).to.equal('true');
 
+        const entities = Object.values(JSON.parse(data.get('data')).entities);
+        for (const entity of entities) {
+            for (const field of ['template', 'template_id', 'template_ent_ids']) {
+                expect(entity).to.have.own.property(field, null);
+            }
+        }
+
         const expected = { entities: {} };
 
         expected.entities[guids[0]] = root.json();
@@ -961,7 +988,7 @@ ${className}.prototype.update = function(dt) {
         expected.entities[guids[0]] = root.json();
         expected.entities[guids[0]].resource_id = guids[0];
         expected.entities[guids[0]].children = [guids[1]];
-        delete expected.entities[guids[0]].template_ent_ids;
+        expected.entities[guids[0]].template_ent_ids = null;
 
         expected.entities[guids[1]] = child.json();
         expected.entities[guids[1]].resource_id = guids[1];

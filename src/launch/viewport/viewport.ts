@@ -1,8 +1,13 @@
+import { Inspector } from '@playcanvas/inspector';
 import type { Observer } from '@playcanvas/observer';
 import { LAYERID_DEPTH } from 'playcanvas';
 
+import { useGlslTranspilation } from '@/common/project-settings';
 import { ReferencedFontHandler } from '@/common/referenced-font-handler';
+import { createLog } from '@/common/sentry';
 import { config } from '@/launch/config';
+
+const log = createLog('<PATH>');
 
 editor.once('load', () => {
     // Wait for assets, hierarchy and settings to load before initializing application and starting.
@@ -88,7 +93,7 @@ editor.once('load', () => {
             if (config.project.settings.useLegacyScripts) {
                 loadingScript.src = `${scriptPrefix}/${config.project.settings.loadingScreenScript}`;
             } else {
-                loadingScript.src = `/api/assets/${config.project.settings.loadingScreenScript}/download?branchId=${config.self.branch.id}`;
+                loadingScript.src = `${config.url.launch}api/assets/${config.project.settings.loadingScreenScript}/download?branchId=${config.self.branch.id}`;
             }
 
             loadingScript.onload = function () {
@@ -137,7 +142,7 @@ editor.once('load', () => {
     scriptPrefix = config.project.scriptPrefix;
 
     // device types
-    const { enableWebGpu, enableWebGl2 } = editor.call('settings:project').json();
+    const { enableWebGpu, enableWebGl2, enableGlslTranspilation } = editor.call('settings:project').json();
     let deviceTypes = [
         enableWebGpu && pc.DEVICETYPE_WEBGPU,
         enableWebGl2 && pc.DEVICETYPE_WEBGL2,
@@ -176,8 +181,12 @@ editor.once('load', () => {
 
     const gfxOptions = {
         deviceTypes: deviceTypes,
-        glslangUrl: '/editor/scene/js/webgpu/glslang.js',
-        twgslUrl: '/editor/scene/js/webgpu/twgsl.js',
+        ...(useGlslTranspilation(enableWebGpu, enableGlslTranspilation)
+            ? {
+                  glslangUrl: '/editor/scene/js/webgpu/glslang.js',
+                  twgslUrl: '/editor/scene/js/webgpu/twgsl.js'
+              }
+            : {}),
         powerPreference: powerPreference,
         antialias: config.project.settings.antiAlias !== false,
         alpha: config.project.settings.transparentCanvas !== false,
@@ -186,7 +195,15 @@ editor.once('load', () => {
 
     app = new pc.AppBase(canvas);
 
-    pc.createGraphicsDevice(canvas, gfxOptions).then((device) => {
+    // no device means no app, so say why in the in-game console rather than sit on the loading screen
+    const deviceReady = pc.createGraphicsDevice(canvas, gfxOptions);
+    deviceReady.catch((err: Error) => {
+        console.error(
+            `Unable to start the app: ${err?.message ?? err}. WebGL may be disabled or not supported by this browser or device.`
+        );
+    });
+
+    deviceReady.then((device) => {
         const createOptions = new pc.AppOptions();
         createOptions.graphicsDevice = device;
 
@@ -254,7 +271,7 @@ editor.once('load', () => {
             mouse: useMouse ? new pc.Mouse(canvas) : null,
             gamepads: useGamepads ? new pc.GamePads() : null,
             touch: useTouch && pc.platform.touch ? new pc.TouchDevice(canvas) : null,
-            assetPrefix: '/api/',
+            assetPrefix: `${config.url.launch}api/`,
             scriptPrefix: scriptPrefix,
             scriptsOrder: projectSettings.get('scripts') || []
         };
@@ -276,6 +293,13 @@ editor.once('load', () => {
 
         app.init(createOptions);
         gfxCreated = true;
+
+        // engine v1 creates the loader in init; unmigrated projects lack these settings
+        app.loader.withCredentials = !!projectSettings.get('withCredentials');
+        const maxRequests = projectSettings.get('maxConcurrentRequests');
+        if (typeof maxRequests === 'number') {
+            app.loader.maxConcurrentRequests = maxRequests;
+        }
 
         // when app is initialized (which is async), emit event to allow dependencies to load
         editor.emit('launcher:device:ready', app);
@@ -347,6 +371,15 @@ editor.once('load', () => {
 
         if (queryParams.ministats) {
             const miniStats = new (pc.MiniStats ? pc.MiniStats : pcx.MiniStats)(app);
+        }
+
+        if (queryParams.inspector) {
+            const [major, minor] = pc.version.split('.').map(Number);
+            if (major > 2 || (major === 2 && minor >= 23)) {
+                new Inspector(app);
+            } else {
+                console.warn(`The Inspector requires Engine 2.23 or later (running ${pc.version})`);
+            }
         }
 
         // localization
@@ -477,6 +510,14 @@ editor.once('load', () => {
             } else {
                 app.loader.disableRetry();
             }
+        });
+
+        projectSettings.on('withCredentials:set', (value: boolean) => {
+            app.loader.withCredentials = value;
+        });
+
+        projectSettings.on('maxConcurrentRequests:set', (value: number) => {
+            app.loader.maxConcurrentRequests = value;
         });
 
         // locale change

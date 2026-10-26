@@ -1,10 +1,11 @@
 import type { Container } from '@playcanvas/pcui';
 import filenamify from 'filenamify/browser';
 
+import { service } from '@/common/supports';
 import { bytesToHuman } from '@/common/utils';
 import { config } from '@/editor/config';
 
-import { BaseStore, EMPTY_THUMBNAIL_IMAGE, EMPTY_THUMBNAIL_IMAGE_LARGE, STORE_ITEM_PAGE_SIZE } from './baseStore';
+import { BaseStore, EMPTY_THUMBNAIL_IMAGE, STORE_ITEM_PAGE_SIZE } from './baseStore';
 
 class AssetsStore extends BaseStore {
     readonly name = 'playcanvasStore';
@@ -95,7 +96,7 @@ class AssetsStore extends BaseStore {
     }
 
     async _loadAssets(id: string) {
-        const results = await editor.api.globals.rest.store.storeAssets(id).promisify();
+        const results = await service('storeCatalog').storeAssets(id).promisify();
         return results.result;
     }
 
@@ -124,7 +125,7 @@ class AssetsStore extends BaseStore {
                 return;
             }
 
-            const url = `/api/store/assets/${asset.id}/file/${asset.file.filename}`;
+            const url = `${config.url.api}/store/assets/${asset.id}/file/${asset.file.filename}`;
             if (this._isModelAsset(asset) && modelUrls.length === 0) {
                 modelUrls.push(encodeUrl(url));
             } else if (this._isTextureAsset(asset)) {
@@ -153,7 +154,7 @@ class AssetsStore extends BaseStore {
         description: string;
         license: string;
     }) {
-        let thumbnail = EMPTY_THUMBNAIL_IMAGE_LARGE;
+        let thumbnail = EMPTY_THUMBNAIL_IMAGE;
         if (item.pictures.length) {
             const pictures = `${config.url.images}/${config.aws.s3Prefix}files/pictures/`;
             thumbnail = `${pictures + item.pictures[0]}/1280x720.jpg`;
@@ -166,6 +167,13 @@ class AssetsStore extends BaseStore {
         }
         const processedAssets = this._prepareAssets(assets);
 
+        // the item's own date isn't bumped when its assets are replaced, so show the latest
+        const modified = (assets ?? []).reduce(
+            (latest: string, a: { modifiedAt?: string }) =>
+                Date.parse(a.modifiedAt) > Date.parse(latest) ? a.modifiedAt : latest,
+            item.modified
+        );
+
         const tags = [];
         for (const tag of item.tags) {
             tags.push({ name: tag, slug: tag });
@@ -175,7 +183,7 @@ class AssetsStore extends BaseStore {
             id: item.id,
             name: item.name,
             size: item.size,
-            modified: item.modified,
+            modified,
             views: item.views,
             downloads: item.downloads,
             description: item.description,
@@ -208,7 +216,7 @@ class AssetsStore extends BaseStore {
         }
 
         const load = async (item: { id: string }) => {
-            return this._prepareItem(await editor.api.globals.rest.store.storeGet(item.id).promisify());
+            return this._prepareItem(await service('storeCatalog').storeGet(item.id).promisify());
         };
 
         for (const item of items) {

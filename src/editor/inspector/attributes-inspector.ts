@@ -3,6 +3,7 @@ import { Element, Container, LabelGroup, Panel, Button, ArrayInput, BindingTwoWa
 import type { IBindable, ContainerArgs } from '@playcanvas/pcui';
 
 import { AssetInput } from '@/common/pcui/element/element-asset-input';
+import { createLog } from '@/common/sentry';
 import { tooltip, tooltipRefItem, TooltipHandle } from '@/common/tooltips';
 import type { History } from '@/editor-api';
 
@@ -10,6 +11,8 @@ import '../storage/clipboard-context-menu';
 import type { TemplateOverrideInspector } from '../templates/templates-override-inspector.js';
 
 import type { Attribute, Divider } from './attribute.type.d';
+
+const log = createLog('<PATH>');
 
 type AttributesInspectorArgs = {
     history?: History;
@@ -188,6 +191,53 @@ class AttributesInspector extends Container {
         );
 
         const field = Element.create(attr.type, fieldArgs);
+
+        // pcui can display a clamped value without changing the observer
+        if (attr.type === 'number' || attr.type === 'slider') {
+            let edited = false;
+            const edit = (evt: Event) => {
+                if (evt.type === 'input') {
+                    edited = true;
+                } else if (evt instanceof KeyboardEvent && evt.key === 'Escape') {
+                    edited = false;
+                }
+            };
+            const commit = (evt: Event) => {
+                if (evt instanceof KeyboardEvent && evt.key !== 'Enter') {
+                    return;
+                }
+                if (evt.type === 'focusout' && !edited) {
+                    return;
+                }
+                edited = false;
+                const { binding, value } = field;
+                if (!field.enabled || field.readOnly || !binding || !Number.isFinite(value)) {
+                    return;
+                }
+                if (
+                    binding.observers.some(
+                        (observer, i) => observer.get(binding.paths[i] ?? binding.paths[0]) !== value
+                    )
+                ) {
+                    binding.setValue(value);
+                }
+            };
+            // pcui clears field.dom before emitting destroy, so keep the node
+            const dom = field.dom;
+            dom.addEventListener('input', edit);
+            dom.addEventListener('keydown', edit, true);
+            dom.addEventListener('change', commit);
+            dom.addEventListener('keydown', commit);
+            dom.addEventListener('focusout', commit);
+            field.once('destroy', () => {
+                dom.removeEventListener('input', edit);
+                dom.removeEventListener('keydown', edit, true);
+                dom.removeEventListener('change', commit);
+                dom.removeEventListener('keydown', commit);
+                dom.removeEventListener('focusout', commit);
+            });
+        }
+
         let evtChange = field.on('change', this._onAttributeChangeHandler);
         field.once('destroy', () => {
             if (!evtChange) {
@@ -221,6 +271,9 @@ class AttributesInspector extends Container {
                         type = 'array:asset';
                     }
                     if (type === 'slider') {
+                        type = 'number';
+                    }
+                    if (type === 'shadow-cascade-mask') {
                         type = 'number';
                     }
                     if ((type === 'asset' || type === 'array:asset') && attr.args?.assetType) {

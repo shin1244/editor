@@ -1,5 +1,8 @@
 import { Button, Container, TextInput } from '@playcanvas/pcui';
 
+import { UNSUPPORTED_TIP } from '@/common/backend';
+import { TooltipHandle } from '@/common/tooltips';
+
 export type VcDialogOpts = {
     title: string;
     // html-free body lines; entity names are passed through bold()
@@ -9,7 +12,12 @@ export type VcDialogOpts = {
     input?: { placeholder: string };
     // confirm disabled until input matches exactly (type-to-confirm)
     confirmMatch?: string;
+    // false when the backend lacks the confirm's service: confirm stays disabled
+    supported?: boolean;
     checkboxes?: { key: string; label: string; value?: boolean }[];
+    // re-run on every checkbox toggle; a non-null result escalates the confirm
+    // button and shows a warning line (e.g. unticking a safety-net checkbox)
+    escalate?: (checks: Record<string, boolean>) => { confirmText: string; warning: string } | null;
     onConfirm: (values: { input: string; checks: Record<string, boolean> }) => void;
     onCancel?: () => void;
 };
@@ -80,6 +88,7 @@ export const showVcDialog = (opts: VcDialogOpts): VcDialogHandle => {
         box.checked = !!c.value;
         box.addEventListener('change', () => {
             checks[c.key] = box.checked;
+            applyEscalation();
         });
         row.appendChild(box);
         const label = document.createElement('span');
@@ -88,6 +97,11 @@ export const showVcDialog = (opts: VcDialogOpts): VcDialogHandle => {
         row.appendChild(label);
         bd.appendChild(row);
     }
+
+    const warning = document.createElement('div');
+    warning.classList.add('vc-dialog-warning');
+    warning.hidden = true;
+    bd.appendChild(warning);
 
     const error = document.createElement('div');
     error.classList.add('vc-dialog-error');
@@ -104,14 +118,27 @@ export const showVcDialog = (opts: VcDialogOpts): VcDialogHandle => {
     const confirm = new Button({ text: opts.confirmText, class: opts.danger ? ['confirm', 'danger'] : 'confirm' });
     ft.appendChild(confirm.dom);
 
+    const supported = opts.supported ?? true;
+    const tip = supported ? null : TooltipHandle.attach({ target: confirm.dom, ...UNSUPPORTED_TIP, align: 'top' });
+
     const updateConfirm = () => {
         // confirmMatch requires an input field; without one the gate is ignored
-        confirm.enabled = !opts.confirmMatch || !input || input.value === opts.confirmMatch;
+        confirm.enabled = supported && (!opts.confirmMatch || !input || input.value === opts.confirmMatch);
     };
     updateConfirm();
     if (input) {
         input.on('change', updateConfirm);
     }
+
+    const applyEscalation = () => {
+        const esc = opts.escalate?.(checks) ?? null;
+        confirm.text = esc ? esc.confirmText : opts.confirmText;
+        confirm.dom.classList.toggle('danger', !!esc || !!opts.danger);
+        hd.classList.toggle('danger', !!esc || !!opts.danger);
+        warning.hidden = !esc;
+        warning.textContent = esc ? esc.warning : '';
+    };
+    applyEscalation();
 
     const close = () => {
         if (activeDialog === handle) {
@@ -119,6 +146,7 @@ export const showVcDialog = (opts: VcDialogOpts): VcDialogHandle => {
         }
         document.removeEventListener('keydown', onKey, true);
         overlay.dom.removeEventListener('mousedown', onBackdrop);
+        tip?.destroy();
         overlay.destroy();
     };
 

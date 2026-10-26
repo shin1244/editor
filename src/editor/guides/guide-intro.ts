@@ -1,5 +1,6 @@
 import type { Observer } from '@playcanvas/observer';
 
+import { backend } from '@/common/backend';
 import { config } from '@/editor/config';
 
 editor.once('load', () => {
@@ -90,8 +91,8 @@ editor.once('load', () => {
     const bubbleDashboard = function () {
         return editor.call(
             'guide:bubble',
-            'Home',
-            'Click here to go to the <strong>Project Dashboard</strong>.<br/><br/>Visit your <strong>Dashboard</strong> to add to your Dev Log or create a new <strong>Project</strong>.',
+            'Projects',
+            'Click here to go back to <strong>All Projects</strong>.<br/><br/>Open another project, or create a new <strong>Project</strong>.',
             12,
             40,
             'top',
@@ -115,7 +116,7 @@ editor.once('load', () => {
         const bubble = editor.call(
             'guide:bubble',
             'Store',
-            '<img width="424" height="133" src="https://playcanvas.com/static-assets/instructions/asset_library.jpg"/><br/><br/>Click the <strong>STORE</strong> button to open the Store. Add free 3D models and assets from the Store into your scene with a single click.',
+            `<img width="424" height="133" src="${config.url.frontend}static/img/asset_library.webp"/><br/><br/>Click the <strong>STORE</strong> button to open the Store. Add free 3D models and assets from the Store into your scene with a single click.`,
             '95%',
             0,
             'bottom-right',
@@ -130,7 +131,7 @@ editor.once('load', () => {
         const bubble = editor.call(
             'guide:bubble',
             'Main Menu',
-            'The <span style="display:inline-block;background-image:url(\'https://playcanvas.com/static-assets/images/editor_logo.png\');width:18px;height:18px;background-size:36px 18px;background-position:-18px 0;vertical-align:text-bottom;"></span> main menu and toolbar has every command available in the Editor. If you can’t find a button or remember a hot key, you will always find the command in the menu.',
+            `The <span style="display:inline-block;background-image:url('${config.url.frontend}static/img/editor_logo.svg');width:18px;height:18px;background-size:36px 18px;background-position:-18px 0;vertical-align:text-bottom;"></span> main menu and toolbar has every command available in the Editor. If you can’t find a button or remember a hot key, you will always find the command in the menu.`,
             18,
             40,
             'top'
@@ -274,7 +275,7 @@ editor.once('load', () => {
 
         // entity bubble on select entity
         if (config.self.flags.tips.entityInspector === false) {
-            const evtEntitySelect = editor.on('selector:change', (type: string | null, items: Observer[]) => {
+            const evtEntitySelect = editor.on('selector:change', (type: string | null, _items: Observer[]) => {
                 if (type !== 'entity') {
                     return;
                 }
@@ -369,7 +370,7 @@ editor.once('load', () => {
 
         editor.once('help:demo:close', () => {
             // set user's openedEditor flag to true
-            editor.api.globals.rest.home.homeSceneOpened(config.scene.id);
+            backend().onboarding?.homeSceneOpened(config.scene.id);
 
             // show some demo specific bubbles first
             setTimeout(() => {

@@ -4,6 +4,9 @@ export const GIZMO_MASK = 8;
 // Picker force pick tag
 export const FORCE_PICK_TAG = 'force-pick';
 
+// Trailing source map comment of a built script
+export const SOURCE_MAP_URL = /\/\/# sourceMappingURL=(\S+)\s*$/;
+
 // Tonemapping modes
 export const TONEMAPPING = ['Linear', 'Filmic', 'Hejl', 'ACES', 'ACES2', 'Neutral'];
 
@@ -35,6 +38,7 @@ export const COMPONENT_LOGOS = {
     model: 'E188',
     particlesystem: 'E199',
     rigidbody: 'E189',
+    joint: 'E426',
     physics: 'E426',
     capsule: 'E421',
     cone: 'E422',

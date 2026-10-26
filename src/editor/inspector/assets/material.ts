@@ -2,12 +2,16 @@ import type { EventHandle, Observer } from '@playcanvas/observer';
 import { Panel, Container } from '@playcanvas/pcui';
 import * as pc from 'playcanvas';
 
-import { CLASS_MULTIPLE_VALUES } from '@/common/pcui/constants';
+import { createLog } from '@/common/sentry';
 import { pathExists } from '@/common/utils';
 import type { History } from '@/editor-api';
 
 import type { Attribute, Divider } from '../attribute.type.d';
 import { AttributesInspector } from '../attributes-inspector';
+
+const log = createLog('<PATH>');
+
+const UV_CHANNEL_OPTIONS = Array.from({ length: 8 }, (_, i) => ({ v: i, t: `UV${i}` }));
 
 const TextureTypes = {
     Normal: 'Normal',
@@ -98,16 +102,7 @@ const createTextureAttribute = (label: string, attributeName: string, type: stri
             type: 'select',
             args: {
                 type: 'number',
-                options: [
-                    {
-                        v: 0,
-                        t: 'UV0'
-                    },
-                    {
-                        v: 1,
-                        t: 'UV1'
-                    }
-                ]
+                options: UV_CHANNEL_OPTIONS
             },
             reference: `asset:material:${attributeName}MapUv`
         },
@@ -639,6 +634,19 @@ const NORMALS_ATTRIBUTES: (Attribute | Divider)[] = [
 const PARALLAX_ATTRIBUTES: (Attribute | Divider)[] = [
     ...createTextureAttribute('Heightmap', 'height', TextureTypes.Scalar),
     {
+        label: 'Mode',
+        path: 'data.parallaxMode',
+        type: 'select',
+        args: {
+            type: 'string',
+            options: [
+                { v: pc.PARALLAX_OFFSET, t: 'Offset' },
+                { v: pc.PARALLAX_OCCLUSION, t: 'Occlusion' }
+            ]
+        },
+        reference: 'asset:material:parallaxMode'
+    },
+    {
         label: 'Strength',
         path: 'data.heightMapFactor',
         type: 'slider',
@@ -649,6 +657,42 @@ const PARALLAX_ATTRIBUTES: (Attribute | Divider)[] = [
             max: 2
         },
         reference: 'asset:material:heightMapFactor'
+    },
+    {
+        label: 'Base',
+        path: 'data.heightMapBase',
+        type: 'slider',
+        args: {
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2
+        },
+        reference: 'asset:material:heightMapBase'
+    },
+    {
+        label: 'Samples',
+        path: 'data.parallaxSamples',
+        type: 'number',
+        args: {
+            min: 4,
+            max: 64,
+            step: 1,
+            precision: 0
+        },
+        reference: 'asset:material:parallaxSamples'
+    },
+    {
+        label: 'Self Shadow',
+        path: 'data.parallaxShadowSamples',
+        type: 'number',
+        args: {
+            min: 0,
+            max: 32,
+            step: 1,
+            precision: 0
+        },
+        reference: 'asset:material:parallaxShadowSamples'
     }
 ];
 
@@ -1061,9 +1105,7 @@ const ENVIRONMENT_ATTRIBUTES: (Attribute | Divider)[] = [
         type: 'slider',
         args: {
             precision: 3,
-            step: 0.01,
-            min: 0,
-            sliderMax: 8
+            step: 0.01
         },
         reference: 'asset:material:reflectivity'
     },
@@ -1193,6 +1235,35 @@ const OTHER_ATTRIBUTES: (Attribute | Divider)[] = [
     }
 ];
 
+/**
+ * Injects server-schema numeric bounds (min/max) onto material `data.*` controls so the
+ * schema catalog is the single source of truth for ranges. Controls the schema does not
+ * bound are returned unchanged, keeping any editor-supplied fallback range.
+ *
+ * @param attributes - The attribute list to augment.
+ * @returns The attribute list with schema bounds applied.
+ */
+const withSchemaBounds = (attributes: (Attribute | Divider)[]) =>
+    attributes.map((attr) => {
+        if (!('path' in attr) || typeof attr.path !== 'string' || !attr.path.startsWith('data.')) {
+            return attr;
+        }
+        const { min, max } = editor.call('schema:asset:getDataBounds', 'material', attr.path);
+        if (min === undefined && max === undefined) {
+            return attr;
+        }
+        const args = { ...attr.args };
+        if (min !== undefined) {
+            args.min = min;
+            args.sliderMin = min;
+        }
+        if (max !== undefined) {
+            args.max = max;
+            args.sliderMax = max;
+        }
+        return { ...attr, args };
+    });
+
 const DOM = (parent) => [
     {
         root: {
@@ -1205,7 +1276,7 @@ const DOM = (parent) => [
                 materialInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: MATERIAL_ATTRIBUTES
+                    attributes: withSchemaBounds(MATERIAL_ATTRIBUTES)
                 })
             }
         ]
@@ -1223,7 +1294,7 @@ const DOM = (parent) => [
                 offsetTilingInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: TEXTURE_TRANFORM_ATTRIBUTES
+                    attributes: withSchemaBounds(TEXTURE_TRANFORM_ATTRIBUTES)
                 })
             }
         ]
@@ -1241,7 +1312,7 @@ const DOM = (parent) => [
                 ambientInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: AMBIENT_ATTRIBUTES
+                    attributes: withSchemaBounds(AMBIENT_ATTRIBUTES)
                 })
             }
         ]
@@ -1259,7 +1330,7 @@ const DOM = (parent) => [
                 diffuseInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: DIFFUSE_ATTRIBUTES
+                    attributes: withSchemaBounds(DIFFUSE_ATTRIBUTES)
                 })
             }
         ]
@@ -1277,28 +1348,28 @@ const DOM = (parent) => [
                 specularInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: SPECULAR_ATTRIBUTES
+                    attributes: withSchemaBounds(SPECULAR_ATTRIBUTES)
                 })
             },
             {
                 metalnessWorkflowInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: METALNESS_WORKFLOW_ATTRIBUTES
+                    attributes: withSchemaBounds(METALNESS_WORKFLOW_ATTRIBUTES)
                 })
             },
             {
                 specularWorkflowInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: SPECULAR_WORKFLOW_ATTRIBUTES
+                    attributes: withSchemaBounds(SPECULAR_WORKFLOW_ATTRIBUTES)
                 })
             },
             {
                 glossInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: GLOSS_ATTRIBUTES
+                    attributes: withSchemaBounds(GLOSS_ATTRIBUTES)
                 })
             }
         ]
@@ -1316,7 +1387,7 @@ const DOM = (parent) => [
                 emissiveInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: EMISSIVE_ATTRIBUTES
+                    attributes: withSchemaBounds(EMISSIVE_ATTRIBUTES)
                 })
             }
         ]
@@ -1334,7 +1405,7 @@ const DOM = (parent) => [
                 opacityInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: OPACITY_ATTRIBUTES
+                    attributes: withSchemaBounds(OPACITY_ATTRIBUTES)
                 })
             }
         ]
@@ -1352,7 +1423,7 @@ const DOM = (parent) => [
                 normalsInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: NORMALS_ATTRIBUTES
+                    attributes: withSchemaBounds(NORMALS_ATTRIBUTES)
                 })
             }
         ]
@@ -1370,7 +1441,7 @@ const DOM = (parent) => [
                 parallaxInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: PARALLAX_ATTRIBUTES
+                    attributes: withSchemaBounds(PARALLAX_ATTRIBUTES)
                 })
             }
         ]
@@ -1388,28 +1459,28 @@ const DOM = (parent) => [
                 clearCoatFactorInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: CLEARCOAT_FACTOR_ATTRIBUTES
+                    attributes: withSchemaBounds(CLEARCOAT_FACTOR_ATTRIBUTES)
                 })
             },
             {
                 clearCoatInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: CLEARCOAT_ATTRIBUTES
+                    attributes: withSchemaBounds(CLEARCOAT_ATTRIBUTES)
                 })
             },
             {
                 clearCoatGlossInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: CLEARCOAT_GLOSS_ATTRIBUTES
+                    attributes: withSchemaBounds(CLEARCOAT_GLOSS_ATTRIBUTES)
                 })
             },
             {
                 clearCoatNormalInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: CLEARCOAT_NORMAL_ATTRIBUTES
+                    attributes: withSchemaBounds(CLEARCOAT_NORMAL_ATTRIBUTES)
                 })
             }
         ]
@@ -1427,7 +1498,7 @@ const DOM = (parent) => [
                 sheenInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: SHEEN_ATTRIBUTES
+                    attributes: withSchemaBounds(SHEEN_ATTRIBUTES)
                 })
             }
         ]
@@ -1445,7 +1516,7 @@ const DOM = (parent) => [
                 refractionInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: REFRACTION_ATTRIBUTES
+                    attributes: withSchemaBounds(REFRACTION_ATTRIBUTES)
                 })
             }
         ]
@@ -1463,7 +1534,7 @@ const DOM = (parent) => [
                 iridescenceInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: IRIDESCENCE_ATTRIBUTES
+                    attributes: withSchemaBounds(IRIDESCENCE_ATTRIBUTES)
                 })
             }
         ]
@@ -1481,7 +1552,7 @@ const DOM = (parent) => [
                 envInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: ENVIRONMENT_ATTRIBUTES
+                    attributes: withSchemaBounds(ENVIRONMENT_ATTRIBUTES)
                 })
             }
         ]
@@ -1499,7 +1570,7 @@ const DOM = (parent) => [
                 lightmapInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: LIGHTMAP_ATTRIBUTES
+                    attributes: withSchemaBounds(LIGHTMAP_ATTRIBUTES)
                 })
             }
         ]
@@ -1517,7 +1588,7 @@ const DOM = (parent) => [
                 otherInspector: new AttributesInspector({
                     assets: parent._args.assets,
                     history: parent._args.history,
-                    attributes: OTHER_ATTRIBUTES
+                    attributes: withSchemaBounds(OTHER_ATTRIBUTES)
                 })
             }
         ]
@@ -1764,6 +1835,7 @@ class MaterialAssetInspector extends Container {
         this._offsetTilingInspector.getField('rotation').on('change', this._onChangeRotation.bind(this));
 
         this._opacityInspector.getField('data.blendType').on('change', toggleFields);
+        this._opacityInspector.getField('data.alphaTest').on('change', toggleFields);
         this._opacityInspector.getField('data.opacityVertexColor').on('change', toggleFields);
         this._opacityInspector.getField('data.opacityFadesSpecular').on('change', toggleFields);
         this._opacityInspector.getField('data.opacityDither').on('change', toggleFields);
@@ -1779,6 +1851,7 @@ class MaterialAssetInspector extends Container {
         this._sheenInspector.getField('data.useSheen').on('change', toggleFields);
         this._refractionInspector.getField('data.useDynamicRefraction').on('change', toggleFields);
         this._iridescenceInspector.getField('data.useIridescence').on('change', toggleFields);
+        this._parallaxInspector.getField('data.parallaxMode').on('change', toggleFields);
 
         for (const map in MAPS) {
             const inspectors = MAPS[map];
@@ -1933,16 +2006,12 @@ class MaterialAssetInspector extends Container {
         const opacityShadowDither = this._opacityInspector.getField('data.opacityShadowDither').value ?? 'none';
         const dithered = opacityDither !== 'none' || opacityShadowDither !== 'none';
         const alphaDitherSupported = pathExists(pc, 'StandardMaterial.prototype.alphaDither');
+        // alpha test applies whatever the blend type and compares against opacity, so while it's on
+        // both stay visible, or a material can turn invisible with nothing in the inspector to explain it
+        const alphaTest = this._opacityInspector.getField('data.alphaTest').value;
         this._opacityInspector.getField('data.opacity').parent.hidden =
-            [2, 4, 6].indexOf(blendType) === -1 && (alphaDitherSupported || !dithered);
+            [2, 4, 6].indexOf(blendType) === -1 && (alphaDitherSupported || !dithered) && !(alphaTest > 0);
         this._opacityInspector.getField('data.alphaDither').parent.hidden = !dithered || !alphaDitherSupported;
-
-        const opacityMapField = this._opacityInspector.getField('data.opacityMap');
-        const opacityVertexColorField = this._opacityInspector.getField('data.opacityVertexColor');
-
-        this._opacityInspector.getField('data.alphaTest').parent.hidden =
-            !(opacityMapField.class.contains(CLASS_MULTIPLE_VALUES) || opacityMapField.value) &&
-            !(opacityVertexColorField.value || opacityVertexColorField.class.contains(CLASS_MULTIPLE_VALUES));
 
         const opacityFadesSpecular = this._opacityInspector.getField('data.opacityFadesSpecular').value;
         this._opacityInspector.getField('data.alphaFade').parent.hidden = opacityFadesSpecular;
@@ -1952,6 +2021,11 @@ class MaterialAssetInspector extends Container {
 
         const heightMap = this._parallaxInspector.getField('data.heightMap').value;
         this._parallaxInspector.getField('data.heightMapFactor').parent.hidden = !heightMap;
+        this._parallaxInspector.getField('data.parallaxMode').parent.hidden = !heightMap;
+        this._parallaxInspector.getField('data.heightMapBase').parent.hidden = !heightMap;
+        const parallaxOcclusion = this._parallaxInspector.getField('data.parallaxMode').value === pc.PARALLAX_OCCLUSION;
+        this._parallaxInspector.getField('data.parallaxSamples').parent.hidden = !heightMap || !parallaxOcclusion;
+        this._parallaxInspector.getField('data.parallaxShadowSamples').parent.hidden = !heightMap || !parallaxOcclusion;
 
         const cubeMapField = this._envInspector.getField('data.cubeMap');
         const sphereMapField = this._envInspector.getField('data.sphereMap');

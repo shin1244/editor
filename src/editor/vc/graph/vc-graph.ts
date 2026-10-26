@@ -1,6 +1,10 @@
 import type { Container, Menu } from '@playcanvas/pcui';
 import type Graph from '@playcanvas/pcui-graph';
 
+import { createLog } from '@/common/sentry';
+
+const log = createLog('<PATH>');
+
 editor.once('load', () => {
     const graphCache: Record<string, { data?: Record<string, unknown>; promise?: Promise<Record<string, unknown>> }> =
         {};
@@ -159,6 +163,15 @@ editor.once('load', () => {
         const show = (data: Record<string, unknown>) => {
             skeleton.remove();
             if (!h.vcGraphContainer.dom.isConnected) {
+                return;
+            }
+
+            // a backend without checkpoint history returns no graph nodes
+            if (!Object.keys(data.idToData ?? {}).length) {
+                const empty = document.createElement('div');
+                empty.classList.add('vc-diff-empty');
+                empty.textContent = 'No checkpoints yet';
+                h.vcGraphContainer.dom.appendChild(empty);
                 return;
             }
             new VcGraphLogic(clone(data), h).run();

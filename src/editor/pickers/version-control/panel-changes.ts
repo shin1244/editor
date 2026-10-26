@@ -1,5 +1,9 @@
 import { Container, TextAreaInput } from '@playcanvas/pcui';
 
+import { backend, UNSUPPORTED_TIP } from '@/common/backend';
+import { createLog } from '@/common/sentry';
+import { service } from '@/common/supports';
+import { TooltipHandle } from '@/common/tooltips';
 import { config } from '@/editor/config';
 
 import { diffCreate } from '../../messenger/jobs';
@@ -20,6 +24,8 @@ import {
     typeLabel
 } from './vc-helpers';
 import type { DiffSummary } from './vc-helpers';
+
+const log = createLog('<PATH>');
 
 // composer height bounds — drag the top edge to resize; persisted per browser.
 // the min keeps the textarea usable above the Create button + tip chrome
@@ -98,15 +104,25 @@ export const createChangesPanel = () => {
     create.textContent = 'Create Checkpoint';
     create.disabled = true;
     form.dom.appendChild(create);
+    const creatable = !!backend().checkpoints && !!backend().jobs;
+    if (!creatable) {
+        TooltipHandle.attach({ target: create, ...UNSUPPORTED_TIP, align: 'bottom' });
+    }
 
     const gateCreate = () => {
         create.disabled =
-            create.classList.contains('busy') || !description.value.trim() || !editor.call('permissions:write');
+            !creatable ||
+            create.classList.contains('busy') ||
+            !description.value.trim() ||
+            !editor.call('permissions:write');
     };
 
     description.on('change', gateCreate);
     // re-evaluate gating when write permission flips mid-session
-    editor.on('permissions:writeState', gateCreate);
+    editor.on('permissions:writeState', () => {
+        gateCreate();
+        renderSummary();
+    });
     description.on('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !create.disabled) {
             sidebar.emit('create', description.value.trim());
@@ -193,7 +209,7 @@ export const createChangesPanel = () => {
             if (!fileStats.has(key)) {
                 fileStats.set(
                     key,
-                    editor.api.globals.rest.merge
+                    service('merges')
                         .mergeConflicts({
                             mergeId: id,
                             conflictId: entry.id,
@@ -347,6 +363,17 @@ export const createChangesPanel = () => {
                 summary.emit('openDiff', !loading && rawDiffLive ? raw : null, rawPromise);
             });
             side.appendChild(openBtn);
+        }
+
+        // throwing away uncheckpointed work sits next to the baseline it reverts to (vs <hash>)
+        if (branch.latestCheckpointId && current?.total && editor.call('permissions:write')) {
+            const discard = document.createElement('button');
+            discard.type = 'button';
+            discard.classList.add('vc-button', 'danger');
+            discard.textContent = 'Discard All…';
+            discard.title = 'Discard all changes since the latest checkpoint';
+            discard.addEventListener('click', () => summary.emit('discardAll', current.total));
+            side.appendChild(discard);
         }
 
         // field-level diff of the selected change

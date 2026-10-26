@@ -3,6 +3,7 @@
 // page, and a runtime font whose `data` only references those (ReferencedFontHandler resolves it).
 // depends on the backend honouring `noConvert`, so it does not also produce a target of its own.
 
+import { backend } from '@/common/backend';
 import { isRefPath } from '@/common/referenced-font-handler';
 import { isReferencedFont } from '@/editor/inspector/assets/font-mode';
 
@@ -74,6 +75,23 @@ editor.once('load', () => {
             const evt = editor.once(`assets:add[${id}]`, (a: any) => {
                 clearTimeout(timer);
                 resolve(a);
+            });
+        });
+
+    const waitForFile = (asset: any) =>
+        new Promise<void>((resolve, reject) => {
+            if (asset.get('file.url')) {
+                resolve();
+                return;
+            }
+            const timer = setTimeout(() => {
+                evt.unbind();
+                reject(new Error(`asset ${asset.get('id')} file never arrived`));
+            }, ASSET_ADD_TIMEOUT);
+            const evt = asset.once('file.url:set', () => {
+                clearTimeout(timer);
+                evt.unbind();
+                resolve();
             });
         });
 
@@ -326,11 +344,14 @@ editor.once('load', () => {
         const font = await getObserver(fontId);
         reloadFont(font);
         editor.call('selector:set', 'asset', [font]);
+        return font;
     };
 
+    // resolves with the new font asset, or undefined if the import failed
     editor.method('fonts:import', (file: File, folder: any) => {
-        importFont(file, folder).catch((err) => {
+        return importFont(file, folder).catch((err) => {
             editor.call('status:error', `Font import failed: ${err?.message ?? err}`);
+            return undefined;
         });
     });
 
@@ -355,7 +376,7 @@ editor.once('load', () => {
         if (!url) {
             throw new Error('font source file not found');
         }
-        const res = await fetch(url);
+        const res = await backend().transport.fetch(url);
         if (!res.ok) {
             throw new Error(`font source file could not be read (${res.status})`);
         }
@@ -410,6 +431,53 @@ editor.once('load', () => {
     editor.method('fonts:reprocess', (font: any, chars: string, invert: boolean) => {
         return reprocess(font, chars, invert).catch((err) => {
             editor.call('status:error', `Font reprocess failed: ${err?.message ?? err}`);
+        });
+    });
+
+    // unpack a raw font cloned from a legacy store item without duplicating its source asset
+    const unpackFont = async (sourceId: number) => {
+        const source = await getObserver(sourceId);
+        await waitForFile(source);
+
+        const target = editor.call(
+            'assets:find',
+            (asset: any) =>
+                asset.get('type') === 'font' &&
+                !asset.get('source') &&
+                `${asset.get('source_asset_id')}` === `${sourceId}`
+        )[0];
+        if (target) {
+            if (!isReferencedFont(target)) {
+                await reprocess(target, DEFAULT_CHARS, false);
+            }
+            return target;
+        }
+
+        const filename = source.get('name');
+        const base = filename.replace(/\.[^.]+$/, '');
+        const path = source.get('path') || [];
+        const parent = path.length ? await getObserver(path[path.length - 1]) : null;
+        const fontId = await createAsset({
+            name: filename,
+            type: 'font',
+            file: new Blob(['{}'], { type: 'application/json' }),
+            filename: `${base}.json`,
+            source_asset_id: `${sourceId}`,
+            // keep the placeholder on the referenced-font path until refs are generated
+            data: { jsonAsset: null, textureAssets: [] },
+            parent,
+            noConvert: true,
+            preload: true
+        });
+        const font = await getObserver(fontId);
+        await reprocess(font, DEFAULT_CHARS, false);
+        editor.call('selector:set', 'asset', [font]);
+        return font;
+    };
+
+    editor.method('fonts:unpack', (sourceId: number) => {
+        return unpackFont(sourceId).catch((err) => {
+            editor.call('status:error', `Font unpack failed: ${err?.message ?? err}`);
         });
     });
 

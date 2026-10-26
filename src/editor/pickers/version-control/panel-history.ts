@@ -1,9 +1,13 @@
 import { Container } from '@playcanvas/pcui';
 
+import { createLog } from '@/common/sentry';
+import { service } from '@/common/supports';
 import { handleCallback } from '@/common/utils';
 import { config } from '@/editor/config';
 
 import { applyUserThumbnail, formatDayGroup, formatRelativeDate, hashChip } from './vc-helpers';
+
+const log = createLog('<PATH>');
 
 const PAGE_SIZE = 50;
 const MAX_COMPARE = 2;
@@ -87,7 +91,7 @@ export const createHistoryPanel = () => {
             if (checkpoint) {
                 applyUserThumbnail(avatar, checkpoint.user.id, 28);
             } else {
-                avatar.src = `${config.url.static}/platform/images/common/blank_project.png`;
+                avatar.src = `${config.url.frontend}static/img/blank-project.webp`;
             }
             row.appendChild(avatar);
         }
@@ -185,7 +189,7 @@ export const createHistoryPanel = () => {
         // capture the current branch id so the callback can verify it against `branch`
         const branchId = branch.id;
         const req = handleCallback(
-            editor.api.globals.rest.branches.branchCheckpoints({
+            service('checkpointHistory').branchCheckpoints({
                 branchId,
                 limit: PAGE_SIZE,
                 skip: more ? (skip as unknown as number) : undefined

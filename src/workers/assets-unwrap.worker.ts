@@ -1,7 +1,7 @@
 import { Unwrap } from '@/common/unwrap';
 import { WorkerServer } from '@/core/worker/worker-server';
 
-const loadFile = (id: number | string, filename: string) => {
+const loadFile = (url: string) => {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
 
@@ -14,13 +14,13 @@ const loadFile = (id: number | string, filename: string) => {
             }
         });
         xhr.addEventListener('error', reject);
-        xhr.open('GET', `${location.origin}/api/assets/${id}/file/${filename}`, true);
+        xhr.open('GET', url, true);
         xhr.send(null);
     });
 };
 
-const start = async (id: number | string, filename: string, padding: number, progress: (val: number) => void) => {
-    const data = await loadFile(id, filename);
+const start = async (url: string, padding: number, progress: (val: number) => void) => {
+    const data = await loadFile(url);
     const unwrap = new Unwrap();
     unwrap.progress = progress;
     unwrap.unwrapJsonModel(data, true, padding, true);
@@ -30,8 +30,8 @@ const start = async (id: number | string, filename: string, padding: number, pro
     return [data, a];
 };
 
-const area = async (id: number | string, filename: string) => {
-    const data = await loadFile(id, filename);
+const area = async (url: string) => {
+    const data = await loadFile(url);
     const unwrap = new Unwrap();
     const a = unwrap.calculateMultiAreaOfJsonModel(data);
     a.uv = unwrap.calculateUv1AreaOfJsonModel(data);
@@ -40,14 +40,19 @@ const area = async (id: number | string, filename: string) => {
 };
 
 const workerServer = new WorkerServer(self);
-workerServer.on('start', async (id: number | string, filename: string, padding: number) => {
+// a rejection in a handler never reaches the worker's onerror, so report it to the client explicitly
+const fail = (e: unknown) => workerServer.send('error', String((e as Error)?.message ?? e));
+
+workerServer.on('start', (url: string, padding: number) => {
     const progress = (val: number) => {
         workerServer.send('progress', val);
     };
-    const [data, a] = await start(id, filename, padding, progress);
-    workerServer.send('start', data, a);
+    start(url, padding, progress)
+        .then(([data, a]) => workerServer.send('start', data, a))
+        .catch(fail);
 });
-workerServer.on('area', async (id: number | string, filename: string) => {
-    const [data, a] = await area(id, filename);
-    workerServer.send('area', data, a);
+workerServer.on('area', (url: string) => {
+    area(url)
+        .then(([data, a]) => workerServer.send('area', data, a))
+        .catch(fail);
 });

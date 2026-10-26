@@ -1,7 +1,10 @@
+import { backend } from '@/common/backend';
 import { buildQueryUrl } from '@/common/utils';
+import { SOURCE_MAP_URL } from '@/core/constants';
 import { WorkerClient } from '@/core/worker/worker-client';
 
 const CLASSIC_PARSE_TIMEOUT = 60000;
+const SCRIPT_ATTRIBUTES_TIMEOUT = 60000;
 
 editor.once('load', () => {
     const genGUID = () => {
@@ -34,11 +37,24 @@ editor.once('load', () => {
             .catch(() => false);
     };
 
+    // parses requested before the parser has started wait here instead of being dropped
+    let parse: ((asset, inEditor, callback) => Promise<void>) | null = null;
+    const pending = [];
+    editor.method('scripts:handleParse', (asset, inEditor, callback) => {
+        if (parse) {
+            return parse(asset, inEditor, callback);
+        }
+        pending.push([asset, inEditor, callback]);
+    });
+
     const workerClient = new WorkerClient(`${config.url.frontend}js/esm-script.worker.js`);
     workerClient.once('init', async () => {
         const typesURL = config.url.engine.replace(/(\.min|\.dbg|\.prf)?\.js$/, '.d.ts');
-        const res = await fetch(typesURL);
-        const types = await res.text();
+
+        // a failed types download must not stop the parser starting, or classic scripts can't parse either
+        const types = await fetch(typesURL)
+            .then((res) => (res.ok ? res.text() : ''))
+            .catch(() => '');
         let hasIncludedTypes = false;
 
         const reqState = new Map();
@@ -72,8 +88,20 @@ editor.once('load', () => {
                 }
             }
 
+            // a connection lost while the tab was idle drops the request or its reply, so stop waiting
+            // rather than leave the parse pending with no error
+            const timer = setTimeout(() => {
+                editor.unbind(`messenger:scriptAttrsFinished:${guid}`);
+                const message = `Timed out while parsing script asset '${asset.get('name')}'. Please refresh the editor.`;
+                if (inEditor) {
+                    editor.call('status:error', message);
+                }
+                callback?.(new Error(message));
+            }, SCRIPT_ATTRIBUTES_TIMEOUT);
+
             // Wait for the backend to finish setting the script attributes
             editor.on(`messenger:scriptAttrsFinished:${guid}`, () => {
+                clearTimeout(timer);
                 if (inEditor) {
                     editor.call('status:clear');
                 }
@@ -97,7 +125,7 @@ editor.once('load', () => {
 
         const postUrl = (asset) => {
             const encodedFileName = encodeURIComponent(asset.get('file.filename'));
-            return buildQueryUrl(`/api/assets/${asset.get('id')}/file/${encodedFileName}`, {
+            return buildQueryUrl(`${config.url.api}/assets/${asset.get('id')}/file/${encodedFileName}`, {
                 branchId: config.self.branch.id
             });
         };
@@ -110,6 +138,22 @@ editor.once('load', () => {
             // Unpack request state
             const { callback, asset, inEditor } = reqState.get(guid);
             reqState.delete(guid);
+
+            // enum values the parser can't evaluate (e.g. `1 << 1`) come back undefined, which the server
+            // rejects without saying why, so report them like other invalid attributes
+            for (const name in scripts) {
+                const script = scripts[name];
+                for (const key in script.attributes ?? {}) {
+                    const options = script.attributes[key].enum;
+                    const unevaluated = (option: Record<string, unknown>) =>
+                        !option || Object.values(option).every((value) => value === undefined);
+                    if (Array.isArray(options) && options.some(unevaluated)) {
+                        (script.attributesInvalid ??= []).push(
+                            `attribute \`${key}\` has enum values that couldn't be evaluated; use literal values or engine constants`
+                        );
+                    }
+                }
+            }
 
             const res = {
                 scripts,
@@ -158,7 +202,7 @@ editor.once('load', () => {
                     // Attempt to fetch the script
                     try {
                         const url = editor.call('assets:realPath', asset);
-                        const res = await fetch(url);
+                        const res = await backend().transport.fetch(url);
                         const content = await res.text();
                         fileCache.set(path, hash);
                         return [path, content];
@@ -171,7 +215,8 @@ editor.once('load', () => {
             return [scripts.filter((script) => !!script), deletedFiles];
         };
 
-        const fetchText = async (url: string) => (await fetch(url)).text();
+        // the worker source and engine are frontend and cdn files; asset files go through the backend
+        const fetchText = async (url: string, get = fetch) => (await get(url)).text();
 
         let workerSourcePromise: Promise<string> | undefined;
         let enginePromise: Promise<string> | undefined;
@@ -188,12 +233,15 @@ editor.once('load', () => {
             };
 
             try {
-                workerSourcePromise ??= fetchText(`${config.url.frontend}js/classic-script.worker.js`);
+                // the network-less sandbox can't load a source map, so drop the comment
+                workerSourcePromise ??= fetchText(`${config.url.frontend}js/classic-script.worker.js`).then((t) =>
+                    t.replace(SOURCE_MAP_URL, '')
+                );
                 enginePromise ??= fetchText(config.url.engine);
                 const [workerSource, engine, script] = await Promise.all([
                     workerSourcePromise,
                     enginePromise,
-                    fetchText(postUrl(asset))
+                    fetchText(postUrl(asset), backend().transport.fetch)
                 ]);
 
                 // allow scripts but omit allow-same-origin, so the sandbox runs on an opaque origin
@@ -206,15 +254,18 @@ editor.once('load', () => {
                 const nonce = genGUID();
                 const csp = `default-src 'none'; script-src 'nonce-${nonce}' 'unsafe-eval' blob:; worker-src blob:; connect-src 'none'`;
 
-                // spawn the parser worker from source text (never a url) and relay its result out
+                // spawn the parser worker from source text (never a url) and relay its result out; never
+                // revoke the worker url (webkit then blocks the worker's own blob importScripts), removing
+                // the iframe frees it
                 iframe.srcdoc = /* html */ `<!DOCTYPE html><html><head>
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 </head><body><script nonce="${nonce}">
 onmessage = (e) => {
     const { workerSource, engine, script, port } = e.data;
     const url = URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+    // not revoked: on the opaque origin the worker loads the blob after new Worker() returns, and
+    // removing the iframe frees it
     const worker = new Worker(url);
-    URL.revokeObjectURL(url);
     worker.onmessage = (ev) => { port.postMessage({ result: ev.data }); worker.terminate(); };
     worker.onerror = (ev) => { port.postMessage({ error: ev.message || 'parse error' }); worker.terminate(); };
     worker.postMessage({ engine, script });
@@ -263,7 +314,7 @@ onmessage = (e) => {
             }
         };
 
-        editor.method('scripts:handleParse', async (asset, inEditor, callback) => {
+        parse = async (asset, inEditor, callback) => {
             if (editor.call('assets:isModule', asset)) {
                 // FIXME: just check engine version directly
                 if (!(await isEsmSupportedInEngine(config.url.engine))) {
@@ -271,6 +322,16 @@ onmessage = (e) => {
                         'ESM scripts are not supported in this version of the engine. Please update to the latest version.';
                     editor.call('status:error', msg);
                     // always settle the callback, otherwise assets.createScript() hangs
+                    callback?.(new Error(msg), undefined);
+                    return;
+                }
+
+                // without the engine types every esm script parses as empty, which would wipe its
+                // attributes, so fail instead
+                if (!types) {
+                    const msg =
+                        "ESM scripts can't be parsed: the engine types failed to load. Reload the Editor to retry.";
+                    editor.call('status:error', msg);
                     callback?.(new Error(msg), undefined);
                     return;
                 }
@@ -297,7 +358,10 @@ onmessage = (e) => {
             }
 
             classicParse(asset, inEditor, callback);
-        });
+        };
+        pending.splice(0).forEach(([asset, inEditor, callback]) => parse(asset, inEditor, callback));
+
+        editor.emit('scripts:parser:ready');
     });
 
     workerClient.once('ready', () => workerClient.send('init', config.url.frontend));

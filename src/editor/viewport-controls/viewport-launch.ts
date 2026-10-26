@@ -96,6 +96,10 @@ editor.once('load', () => {
             query.push('ministats=true');
         }
 
+        if (launchOptions.inspector) {
+            query.push('inspector=true');
+        }
+
         // the editor relays the launch page to MCP, so it opens no socket of its own
         const withMcp = editor.call('mcp:status') === 'connected';
 
@@ -132,6 +136,9 @@ editor.once('load', () => {
     };
 
     editor.method('launch:window', () => lastLaunch);
+
+    // MCP reads the tick-box state so launch_start picks the same engine as the button
+    editor.method('launch:options', () => ({ ...launchOptions }));
 
     // MCP launches record their window here too, so there is one source of truth
     editor.method('launch:window:track', (win: Window) => {
@@ -176,7 +183,9 @@ editor.once('load', () => {
     };
 
     const createOption = (name: string, title: string) => {
-        const panel = new Container();
+        const panel = new Container({
+            class: `launch-option-${name}`
+        });
         panelOptions.append(panel);
 
         const option = new BooleanInput({
@@ -310,6 +319,24 @@ editor.once('load', () => {
         root: root
     }).class.add('launch-tooltip');
 
+    // inspector
+    const optionInspector = createOption('inspector', 'Inspector');
+    optionInspector.value = settings.get('editor.launchInspector');
+    settings.on('editor.launchInspector:set', (value: boolean) => {
+        if (value !== optionInspector.value) {
+            optionInspector.value = value;
+        }
+    });
+    optionInspector.on('change', (value: boolean) => {
+        settings.set('editor.launchInspector', value);
+    });
+    TooltipHandle.attach({
+        target: optionInspector.parent.dom,
+        text: 'Show the Inspector debug panel in the launched application. Requires Engine 2.23 or later.',
+        align: 'right',
+        root: root
+    }).class.add('launch-tooltip');
+
     // release-candidate
     if (releaseCandidate) {
         const optionReleaseCandidate = createOption('releaseCandidate', 'Use Release Candidate');
@@ -435,6 +462,7 @@ editor.once('load', () => {
     const topStrips = ':is(.control-strip.top-left, .control-strip.top-right)';
     const buttonSelector = [
         `${topStrips} > .pcui-button`,
+        `${topStrips} > .control-strip-crumbs > .pcui-button`,
         `${topStrips} > .render > .pcui-button`,
         `${topStrips} > .camera > .pcui-button`,
         `${topStrips} > .launch > .pcui-button`
@@ -444,7 +472,10 @@ editor.once('load', () => {
         document.querySelectorAll(buttonSelector).forEach((btn) => {
             const text = btn.getAttribute('data-full-text');
             if (text !== null) {
-                btn.textContent = text;
+                // scene:name handlers registered earlier already wrote the new name, keep it
+                if (!btn.textContent) {
+                    btn.textContent = text;
+                }
                 btn.removeAttribute('data-full-text');
             }
         });

@@ -1,4 +1,8 @@
+import { backend } from '@/common/backend';
+import { createLog } from '@/common/sentry';
 import { share } from '@/common/sharedb';
+
+const log = createLog('<PATH>');
 
 editor.once('load', () => {
     let auth = false;
@@ -89,7 +93,7 @@ editor.once('load', () => {
 
     reconnect = function () {
         // create new socket...
-        socket = new WebSocket(config.url.realtime.http);
+        socket = backend().transport.socket(config.url.realtime.http);
         socket.onerror = () => {
             console.warn(`launch websocket error (url: ${config.url.realtime.http})`);
         };

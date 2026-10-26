@@ -1,5 +1,6 @@
 import { Button, Container } from '@playcanvas/pcui';
 
+import { backend } from '@/common/backend';
 import { TooltipHandle } from '@/common/tooltips';
 
 editor.once('load', () => {
@@ -36,10 +37,8 @@ editor.once('load', () => {
         const button = new Button({
             class: ['control-strip-btn', 'whoisonline-user']
         });
-        button.style.backgroundImage = `url(/api/users/${id}/thumbnail?size=28)`;
+        button.style.backgroundImage = `url(${config.url.api}/users/${id}/thumbnail?size=28)`;
         panel.append(button);
-
-        let clickHandle = button.on('click', () => window.open(`/${id}`, '_blank'));
 
         const tooltip = TooltipHandle.attach({
             target: button.dom,
@@ -51,8 +50,10 @@ editor.once('load', () => {
         userMap.set(id, { button, tooltip });
 
         editor.call('users:loadOne', id, (user: { username: string; id: number }) => {
-            clickHandle.unbind();
-            clickHandle = button.on('click', () => window.open(`/user/${user.username}`, '_blank'));
+            const { pages } = backend();
+            if (pages) {
+                button.on('click', () => window.open(pages.user(user.username), '_blank'));
+            }
             tooltip.text = user.username;
             button.style.backgroundColor = editor.call('users:color', user.id, 'hex');
         });

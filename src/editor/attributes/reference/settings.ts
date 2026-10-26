@@ -384,6 +384,12 @@ editor.once('load', () => {
             description: `When enabled, the application will try to use WebGPU${editor.projectEngineV2 ? '' : ' (beta)'} if available.`
         },
         {
+            name: 'settings:project:enableGlslTranspilation',
+            title: 'Enable GLSL Shader Transpilation',
+            description:
+                'When enabled, GLSL-only shaders are supported under WebGPU. This adds shader compiler files to published and downloaded builds.'
+        },
+        {
             name: 'settings:project:enableWebGl2',
             title: 'Enable WebGL 2.0',
             description: 'When enabled, the application will try to use WebGL 2.0 if available.'
@@ -450,6 +456,18 @@ editor.once('load', () => {
             title: 'Max Asset Retries',
             description:
                 'The maximum number of times to retry loading an asset if it fails to load. If an asset request fails, it will be retried with exponential backoff.'
+        },
+        {
+            name: 'settings:project:withCredentials',
+            title: 'Asset Credentials',
+            description:
+                'Send asset requests with credentials such as cookies, client certificates, or HTTP authentication. Authenticated cross-origin servers must allow credentials and return a specific origin.'
+        },
+        {
+            name: 'settings:project:maxConcurrentRequests',
+            title: 'Max Concurrent Requests',
+            description:
+                'Maximum number of asset requests that may run at once. Set to 0 to disable request throttling.'
         },
         {
             name: 'settings:zoomSensitivity',
@@ -702,6 +720,118 @@ editor.once('load', () => {
             title: 'lightingMaxLightsPerCell',
             description: 'Maximum number of lights a cell can store.',
             url: 'https://api.playcanvas.com/engine/classes/LightingParams.html#maxlightspercell'
+        },
+        {
+            name: 'settings:lightingMaxLights',
+            title: 'lightingMaxLights',
+            description:
+                'Maximum number of clustered lights visible in a frame. Keep this as low as the scene allows; values above 255 use a larger light-index texture.',
+            url: 'https://api.playcanvas.com/engine/classes/LightingParams.html#maxlights'
+        },
+        {
+            name: 'settings:gsplatRadialSorting',
+            title: 'gsplatRadialSorting',
+            description: 'Sort splats by radial camera distance instead of view depth.'
+        },
+        {
+            name: 'settings:gsplatLodUpdateDistance',
+            title: 'gsplatLodUpdateDistance',
+            description: 'Camera travel distance that triggers a Gaussian splat LOD update.'
+        },
+        {
+            name: 'settings:gsplatLodUpdateAngle',
+            title: 'gsplatLodUpdateAngle',
+            description:
+                'Camera rotation in degrees that triggers an LOD update. Rotation only affects LOD through the behind penalty, so set to 0 or set the penalty to 1 to disable angle updates.'
+        },
+        {
+            name: 'settings:gsplatLodBehindPenalty',
+            title: 'gsplatLodBehindPenalty',
+            description:
+                'Distance multiplier used for splat nodes behind the camera during LOD selection. 1 means no penalty. Streamed LOD files also load in this order, so higher values load the view in front of the camera first.'
+        },
+        {
+            name: 'settings:gsplatLodUnderfillLimit',
+            title: 'gsplatLodUnderfillLimit',
+            description: 'Number of lower-detail LOD levels that can be used while optimal data loads.'
+        },
+        {
+            name: 'settings:gsplatSplatBudget',
+            title: 'gsplatSplatBudget',
+            description:
+                'Number of splats rendered across the scene, used as set by the Splat Budget Mode. Set to 0 for no budget.'
+        },
+        {
+            name: 'settings:gsplatSplatBudgetMode',
+            title: 'gsplatSplatBudgetMode',
+            description:
+                'How the splat budget is used. Target raises detail until the budget is used up. Limit lets the LOD distances of each GSplat decide the detail, and only lowers it to fit the budget.'
+        },
+        {
+            name: 'settings:gsplatAlphaClip',
+            title: 'gsplatAlphaClip',
+            description: 'Alpha threshold for Gaussian splat shadow, picking and prepass rendering.'
+        },
+        {
+            name: 'settings:gsplatAlphaClipForward',
+            title: 'gsplatAlphaClipForward',
+            description: 'Alpha threshold below which splats are removed from the forward pass.'
+        },
+        {
+            name: 'settings:gsplatMinPixelSize',
+            title: 'gsplatMinPixelSize',
+            description: 'Minimum screen-space size below which splats are discarded.'
+        },
+        {
+            name: 'settings:gsplatMinContribution',
+            title: 'gsplatMinContribution',
+            description: 'Minimum visual contribution below which splats are culled. Set to 0 to disable it.'
+        },
+        {
+            name: 'settings:gsplatFoveationStrength',
+            title: 'gsplatFoveationStrength',
+            description: 'Strength of contribution culling towards the screen edges. Set to 0 to disable it.'
+        },
+        {
+            name: 'settings:gsplatFoveationCenter',
+            title: 'gsplatFoveationCenter',
+            description: 'Protected screen-centre radius where foveation does not apply.'
+        },
+        {
+            name: 'settings:gsplatAntiAlias',
+            title: 'gsplatAntiAlias',
+            description: 'Apply anti-aliasing compensation to splats trained with anti-aliasing.'
+        },
+        {
+            name: 'settings:gsplatUseFog',
+            title: 'gsplatUseFog',
+            description: 'Apply scene fog to Gaussian splats.'
+        },
+        {
+            name: 'settings:gsplatUseTonemap',
+            title: 'gsplatUseTonemap',
+            description:
+                'Apply camera tonemapping and scene exposure to Gaussian splats. Other scene objects are unaffected.'
+        },
+        {
+            name: 'settings:gsplatColorUpdateAngle',
+            title: 'gsplatColorUpdateAngle',
+            description: 'Viewing-angle change that triggers a spherical-harmonics color update.'
+        },
+        {
+            name: 'settings:gsplatCooldownTicks',
+            title: 'gsplatCooldownTicks',
+            description: 'Ticks an unused streamed splat resource waits before unloading.'
+        },
+        {
+            name: 'settings:gsplatDataFormat',
+            title: 'gsplatDataFormat',
+            description: 'Work-buffer format used for Gaussian splat rendering.'
+        },
+        {
+            name: 'settings:gsplatEnableIds',
+            title: 'gsplatEnableIds',
+            description: 'Store a unique component ID in the Gaussian splat work buffer.'
         },
         {
             name: 'settings:lightingCookieAtlasResolution',
